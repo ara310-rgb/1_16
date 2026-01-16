@@ -3,59 +3,101 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 import numpy as np
+import platform
+import os
+from matplotlib import font_manager, rc
 
+# 1. 한글 폰트 강제 설정 (NanumGothic.ttf 사용)
+@st.cache_resource
+def setup_font():
+    font_file = "NanumGothic.ttf"
+    
+    # 1순위: 같은 폴더에 NanumGothic.ttf가 있는지 확인
+    if os.path.exists(font_file):
+        font_name = font_manager.FontProperties(fname=font_file).get_name()
+        rc('font', family=font_name)
+    else:
+        # 2순위: 파일이 없을 경우 OS별 기본 한글 폰트 사용
+        if platform.system() == 'Windows':
+            rc('font', family='Malgun Gothic')
+        elif platform.system() == 'Darwin': # Mac
+            rc('font', family='AppleGothic')
+        else: # Linux/Streamlit Cloud
+            rc('font', family='NanumGothic')
+            
+    plt.rcParams['axes.unicode_minus'] = False # 마이너스 기호 깨짐 방지
 
-# pip install -r requiremnet.txt를 하면 한번에 install 가능
+setup_font()
 
+st.set_page_config(page_title="국세청 근로소득 분석기", layout="wide")
 st.title("📊 국세청 근로소득 데이터 분석기")
 
-
 # 데이터 불러오기
-file_path = "/data/국세청_근로소득 백분위(천분위) 자료_20241231.csv"
-# ./ 현재 내가 있는 위치에서 data 방으로 가서 그 안의 파일을 불러들여라, "."은 사용안해도 괜찮음
-# "." 현재 디렉토리, ".." 한 단계 밖에 나가고 싶을 때,
-# path=../images/"a.jpg" 방을 먼저 나가서, 다음 방을 나간 다음, 원하는 파일명을 쓰기!
+file_path = "과학기술정보통신부_이공계인력실태조사_박사 근로소득 통계_20101231.csv"
 
+# 2. 인코딩 에러 방지를 위한 다중 로드 시도
+def load_data(path):
+    # 'utf-8-sig'를 가장 먼저 시도 (이미지에서 성공했던 인코딩)
+    encodings = ['utf-8-sig', 'cp949', 'euc-kr', 'utf-8']
+    for encoding in encodings:
+        try:
+            df = pd.read_csv(path, encoding=encoding)
+            # 컬럼명 앞뒤 공백 제거 (매우 중요)
+            df.columns = df.columns.str.strip()
+            return df, encoding
+        except (UnicodeDecodeError, FileNotFoundError):
+            continue
+    return None, None
 
-# 엑셀의 iferror처럼 혹시나 발생할 오류에 대비하는 함수
-# 오류기 나면 except 함수가 예외로 실행됨
+try:
+    df, used_encoding = load_data(file_path)
 
-try :
-    # 자료 읽기
-    df=pd.read_csv(file_path)
-    st.success("✅ 데이터를 성공적으로 불러 왔습니다!")
+    if df is not None:
+        st.success(f"✅ 데이터를 성공적으로 불러왔습니다! (인코딩: {used_encoding})")
 
-    # 데이터 미리 보기
-    st.subheader("✔️ 데이터를 확인하기")
-    st.dataframe(df.head()) # ()안에 아무것도 없으면 표 상단 5줄 보여주기, 추가하고 싶으면 괄호 넣기
+        # 상단 요약 정보 (Metrics)
+        col_m1, col_m2 = st.columns(2)
+        col_m1.metric("전체 데이터 수", f"{len(df):,}")
+        col_m2.metric("분석 가능 항목 수", len(df.select_dtypes(include=[np.number]).columns))
 
+        # 데이터 미리 보기
+        with st.expander("📝 데이터 원본 보기", expanded=False):
+            st.dataframe(df, use_container_width=True)
 
-    # 데이터 분석 그래프 그리기
-    st.subheader("📉 항목별 분포 그래프")
+        st.divider()
 
-    # 분석하고 싶은 열 이름을 선택
-    # 급여,인원 같은 숫자 데이터가 있는 칸을 골라야 한다
-    columns_names=df.columns.tolist()  # 컬럼의 첫번째 덩어리를 갖고오겠음
-    selected_col=st.selectbox("분석할 항목을 선택하세요 : ", columns_names)
+        # 3. 데이터 시각화 섹션
+        st.subheader("📈 항목별 분포 시각화")
+        
+        # 수치형 데이터만 추출
+        numeric_columns = df.select_dtypes(include=['number']).columns.tolist()
 
+        if numeric_columns:
+            # 설정 레이아웃
+            c1, c2 = st.columns([1, 3])
+            
+            with c1:
+                st.info("그래프 설정을 조절하세요.")
+                selected_col = st.selectbox("분석할 항목 선택:", numeric_columns)
+                bins = st.slider("막대 세밀도(Bins):", 5, 100, 30)
+                graph_color = st.color_picker("그래프 색상:", "#6C63FF")
+                show_kde = st.checkbox("밀도 곡선(KDE) 표시", value=True)
 
-    # 그래프 그리기 (seaborn 사용)
-    # fig(그래프의 전체사이즈), ax(그래프가 그려질 공간)
-    fig, ax = plt.subplots(figsize=(10,5))
-    sns.histplot(df[selected_col], ax=ax, color="#F3F33D")
+            with c2:
+                # 그래프 그리기
+                fig, ax = plt.subplots(figsize=(10, 6))
+                # NaN 값이 있을 경우 히스토그램에서 에러가 날 수 있으므로 dropna() 적용
+                sns.histplot(df[selected_col].dropna(), bins=bins, kde=show_kde, ax=ax, color=graph_color)
+                
+                ax.set_title(f"<{selected_col}> 분포도", fontsize=16, pad=20)
+                ax.set_xlabel(selected_col, fontsize=12)
+                ax.set_ylabel("빈도수", fontsize=12)
+                st.pyplot(fig)
+        else:
+            st.warning("분석할 수 있는 숫자형 데이터가 없습니다.")
 
-   
-    plt.title(f"[{selected_col}] 분포 확인")  # 그래프 맨 위 제목
-    plt.xlabel(selected_col) # 가로축(x) 제목
-    plt.ylabel("빈도수")  # 세로축(y) 제목 얼마나 자주 나오는지
+    else:
+        st.error(f"❌ '{file_path}' 파일을 찾을 수 없거나 인코딩이 맞지 않습니다.")
 
-
-    # 스트림릿 웹 화면에 그래프 표시
-    st.pyplot(fig)
-
-
-
-except FileNotFoundError :
-    st.error(f"🚨 '{file_path}' 파일을 찾을 수 없습니다. 파일명이 정확한지 확인해주세요.")
-except Exception as e :
-    st.error(f"🚨 에러가 발생했습니다{e}")
+except Exception as e:
+    st.error(f"❌ 예기치 못한 에러가 발생했습니다: {e}")

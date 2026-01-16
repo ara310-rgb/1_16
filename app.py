@@ -7,22 +7,30 @@ import platform
 import os
 from matplotlib import font_manager, rc
 
-# 1. 한글 폰트 강제 설정 (NanumGothic.ttf 사용)
+# 1. 한글 폰트 강제 설정
 @st.cache_resource
 def setup_font():
-    font_file = "NanumGothic.ttf"
+    # ★ 여기부터 추가 ★ (Streamlit Cloud 리눅스 환경을 위한 설정)
+    # 리눅스 서버에 fonts-nanum 패키지 설치 시 저장되는 기본 경로입니다.
+    linux_font_path = '/usr/share/fonts/truetype/nanum/NanumGothic.ttf'
     
-    # 1순위: 같은 폴더에 NanumGothic.ttf가 있는지 확인
-    if os.path.exists(font_file):
-        font_name = font_manager.FontProperties(fname=font_file).get_name()
+    if os.path.exists(linux_font_path):
+        # 1순위: Streamlit Cloud 서버 환경인 경우
+        font_name = font_manager.FontProperties(fname=linux_font_path).get_name()
+        rc('font', family=font_name)
+    # ★ 여기부터 추가 끝 ★
+    
+    elif os.path.exists("NanumGothic.ttf"):
+        # 2순위: 로컬 폴더에 폰트 파일이 직접 있는 경우
+        font_name = font_manager.FontProperties(fname="NanumGothic.ttf").get_name()
         rc('font', family=font_name)
     else:
-        # 2순위: 파일이 없을 경우 OS별 기본 한글 폰트 사용
+        # 3순위: 파일이 없을 경우 운영체제별 기본 한글 폰트 사용
         if platform.system() == 'Windows':
             rc('font', family='Malgun Gothic')
         elif platform.system() == 'Darwin': # Mac
             rc('font', family='AppleGothic')
-        else: # Linux/Streamlit Cloud
+        else: # Linux 환경이나 위 경로에 폰트가 없을 경우
             rc('font', family='NanumGothic')
             
     plt.rcParams['axes.unicode_minus'] = False # 마이너스 기호 깨짐 방지
